@@ -1,0 +1,228 @@
+Prediction of Correct Exercise Technique of Dumbbell Curls using sensor data by Carl Roke 
+----
+
+###Overview
+The goal of your report is to create models for predicting if subjects are performing certian barbell exercizes correctly.  The project will be to use data from accelerometers on the subjects belt, forearm, arm, and dumbell. 
+
+The subjects were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The data was collected along with the correct/incorrect status.
+
+This project uses data collected from the the following study:
+
+* Qualitative Activity Recognition of Weight Lifting Exercises [1]
+
+It consists of data recorded from a weight lifting activity, specifically arm
+curls with a dumbbell, performed by six male participants aged between 20-28 
+years, with little weight lifting experience. 
+     
+To record the activity, sensors were mounted in the users’ glove, armband,
+lumbar belt and dumbbell.   
+
+Participants were asked to perform one set of 10 repetitions                                                    
+of the Unilateral Dumbbell Biceps Curl in five different fashions:
+exactly according to the specifications:
+
+* (Class A) - correctly specified execution of the exercise
+* (Class B) - incorrectly throwing the elbows to the front 
+* (Class C) - incorrectly lifting the dumbbell only halfway 
+* (Class D) - incorrectly lowering the dumbbell only halfway        
+* (Class E) - incorrectly  throwing the hips to the front 
+ 
+Class A corresponds to the specified execution of the exercise,         
+while the other 4 classes correspond to common mistakes.  This 
+variable was represented in the "classe" field in the data.         
+
+Data was collected using a sliding window approach with different lengths 
+from 0.5 second to 2.5 seconds, with 0.5 second overlap. In each step of 
+the sliding window approach, the following features on the Euler angles 
+(roll, pitch and yaw) were recorded:
+
+- the raw accelerometer, gyroscope and magnetometer readings. 
+- calculated mean,  variance, standard deviation, max, min, amplitude, kurtosis and skewness
+
+In total, 96 derived feature sets were recoreded. 
+
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+###Data Dictionary
+The following are common fields for each record:
+
+* user_name : name of six male participants          
+* raw_timestamp_part_1 : timestamp interval 
+* raw_timestamp_part_2 : timestamp sub-interval  
+* cvtd_timestamp : datetime of event        
+* new_window : new window (yes/no)            
+* num_window : window identifier            
+* classe : execution results (A/B/C/D/E)                      
+
+The following fields were repeated for each of the 4 sensor locatons (belt, armband, glove, dumbbell: 
+
+* roll : Euler angle measurement            
+* pitch : Euler angle measurement            
+* yaw : Euler angle measurement              
+* total_accel : Calculated feature from Euler angle    
+* kurtosis_roll : Calculated feature from Euler angle     
+* kurtosis_picth : Calculated feature from Euler angle    
+* kurtosis_yaw : Calculated feature from Euler angle      
+* skewness_roll : Calculated feature from Euler angle     
+* skewness_roll : Calculated feature from Euler angle   
+* skewness_yaw : Calculated feature from Euler angle      
+* max_roll : Calculated feature from Euler angle          
+* max_picth : Calculated feature from Euler angle         
+* max_yaw : Calculated feature from Euler angle           
+* min_roll : Calculated feature from Euler angle          
+* min_pitch : Calculated feature from Euler angle         
+* min_yaw : Calculated feature from Euler angle           
+* amplitude_roll : Calculated feature from Euler angle    
+* amplitude_pitch : Calculated feature from Euler angle   
+* amplitude_yaw : Calculated feature from Euler angle     
+* var_total_accel : Calculated feature from Euler angle   
+* avg_roll : Calculated feature from Euler angle          
+* stddev_roll : Calculated feature from Euler angle       
+* var_roll : Calculated feature from Euler angle          
+* avg_pitch : Calculated feature from Euler angle         
+* stddev_pitch : Calculated feature from Euler angle       
+* var_pitch : Calculated feature from Euler angle         
+* avg_yaw : Calculated feature from Euler angle           
+* stddev_yaw : Calculated feature from Euler angle        
+* var_yaw : Calculated feature from Euler angle           
+* gyros_x : axis reading from gyroscope        
+* gyros_y : axis reading from gyroscope           
+* gyros_z : axis reading from gyroscope           
+* accel_x : axis reading from accelerometer       
+* accel_y : axis reading from accelerometer         
+* accel_z : axis reading from accelerometer         
+* magnet_x : axis reading from magnetometer        
+* magnet_y : axis reading from magnetometer        
+* magnet_z : axis reading from magnetometer        
+
+###Load the source dataset
+```{r echo = T, message = F, warning = F}
+# Clean up workspace
+rm(list=ls())
+
+#set up libraries
+if (!require("ggplot2")) {
+  install.packages("ggplot2", repos="http://cran.rstudio.com/") 
+  library("ggplot")
+}
+if (!require("caret")) {
+  install.packages("caret", repos="http://cran.rstudio.com/") 
+  library("caret")
+}
+if (!require("doParallel")) {
+  install.packages("doParallel", repos="http://cran.rstudio.com/") 
+  library("doParallel")
+}
+
+#set up parallel operations
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+
+# download data files
+urltrain <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+urltest <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+trainfile<-'pml-training.csv'
+testfile<-'pml-testing.csv'
+download.file(urltrain, destfile=trainfile, method='curl')
+download.file(urltest, destfile=testfile, method='curl')
+
+# read data files, since there is a large sample size, I am splitting the training into test/training, and creating validation set for the testing set.
+training<-read.csv(trainfile, na.strings=c("#DIV/0!","NA"), header=TRUE, stringsAsFactors=TRUE, sep=",")
+validation<-read.csv(testfile,  na.strings=c("#DIV/0!","NA"), header=TRUE, stringsAsFactors=TRUE, sep=",")
+
+```
+
+###Exploratory Analysis
+Exploratory analysis via (summary(testing)), showed there were many columns that had 97% NA values.  These will need to be removed.  It was also shown that there were a number of garbage values "#DIV/0!" and "NA"" strings that will need to be converted to NA values.
+
+
+###Clean the data
+```{r}
+
+# if the amount of NA is larger than 19200, record the column
+large_na_cols<-c()
+for(var in 1:ncol(training)) 
+{
+ if  (sum(is.na(training[var]))>19200) {
+    large_na_cols<-c(large_na_cols,var) 
+  }
+}
+
+# remove the na columns
+training<-training[-c(large_na_cols)]
+#dim(training)
+
+#split the training set into training and testing, 1/3 testing, 2/3 training
+set.seed(3433)
+inTrain = createDataPartition(training$classe, p = 2/3)[[1]]
+training = training[ inTrain,]
+testing = training[-inTrain,]
+
+# remove unwanted columns
+training<-training[,c(-1,-2,-3,-4,-5,-6,-7)]
+testing<-testing[,c(-1,-2,-3,-4,-5,-6,-7)]
+```
+
+
+###Machine learning algorithm to predict activity quality from activity monitors
+The machine learning algorithm used was a random forest model with 3 K folds, repeated 3 times for Cross Validation. Preprocessing will be done via PCA.  See the results below:
+```{r warning = F}
+
+#build model and confusion matrix
+ctrl <- trainControl(method = "repeatedcv",
+                    repeats=3,
+                    number=3)
+modelFit <- train(training$classe ~ .,
+                  method="rf",
+                  preProcess="pca",
+                  data=training, 
+                  trControl = ctrl)
+
+modelFit
+confusionMatrix(testing$classe,predict(modelFit,testing))
+
+#compare model predictions and actuals for testing/training
+predictions <-predict(modelFit,testing)
+identical(predictions,testing$classe)
+
+#execute model on the validation set
+validationPredictions<-predict(modelFit,validation)
+validationPredictions
+table(predictions,testing$classe)
+
+#plot prediction vs actuals for the testing
+qplot(classe,predictions,data=testing)
+
+```
+
+
+### The Expected Sample Error Rate from Cross Validation
+The random forest model created 3 trees, the following average error rate is expected:
+```{r}
+mean(modelFit$results$Accuracy)
+```
+The model error (accuracy) from the confusion matric is as also 95%.
+
+### Accuracy (Repeated Cross Validation) vs Predictors
+```{r}
+plot(modelFit)
+```
+
+###Print out the results of the test files
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(validationPredictions)
+```
+
+---------------------------
+###References:
+
+[1] Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf
